@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Net.NetworkInformation;
 using System.Reflection;
+using System.Runtime.Remoting.Contexts;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -20,9 +21,11 @@ namespace CommandClient
         private object _reportLock;
         private string _result;
         private const string LOG_SEPARATOR = "********************************************";
-        private SocketClient client;
+        private SocketClient _client;
         private JsonReport _jReport;
         private bool _closing;
+        private List<string> _commandList;
+        private bool _runCommandList = false;
 
         public JsonReport JReport
         {
@@ -62,13 +65,14 @@ namespace CommandClient
             _closing = false;
             _jReport = null;
             _reportLock = new object();
+            _commandList = new List<string>();
             _result = "";
             IPadd.Text = "127.0.0.2";
             Port.Text = "23001";
             txtSLPath.Text = @"C:\Program Files\3D Infotech\Streamline\Streamline.exe";
             //InputBox.Text = "Command:RunProgram, Part:Test1, Program:Test1_Program, Serial Number:1_7, Order Number:331020201231032, Operator Name:test, Operator Contact:1513454333";
-            InputBox.Text = "Command:RunProgram, Part:!!Testing, Program:JointposeTest";
-            LogBox.Text = "Application Started." + Environment.NewLine;
+            InputBox.Text = "Command:RunProgram, Part:!!Testing, Program:AutoTest, Serial Number:8";
+            LogText("Application Started.");
         }
         // Command:RunProgram, Part:Test1, Program:Test1_Program, Serial Number:AR4198, Order Number:OC0175,  Operator Name:Joe
 
@@ -82,13 +86,13 @@ namespace CommandClient
             try
             {
                 DisposeClient();
-                client = new SocketClient();
-                client.RaiseTextReceivedEvent += HandleTextReceived;
-                client.RaiseMessageReceivedEvent += HandleMessage;
+                _client = new SocketClient();
+                _client.RaiseTextReceivedEvent += HandleTextReceived;
+                _client.RaiseMessageReceivedEvent += HandleMessage;
             }
             catch (Exception ex)
             {
-                LogBox.Text += $"Exception thrown: {ex.Message}" + Environment.NewLine;
+                LogText($"Exception thrown: {ex.Message}");
                 return false;
             }
             return true;
@@ -102,19 +106,19 @@ namespace CommandClient
         {
             try
             {
-                if (client != null)
+                if (_client != null)
                 {
-                    client.RaiseTextReceivedEvent -= HandleTextReceived;
-                    client.RaiseMessageReceivedEvent -= HandleMessage;
-                    client.CloseAndDisconnect();
-                    client = null;
+                    _client.RaiseTextReceivedEvent -= HandleTextReceived;
+                    _client.RaiseMessageReceivedEvent -= HandleMessage;
+                    _client.CloseAndDisconnect();
+                    _client = null;
                     return true;
                 }
             }
             catch (Exception ex)
             {
-                LogBox.Text += $"Exception thrown: {ex.Message}" + Environment.NewLine;
-                client = null;
+                LogText($"Exception thrown: {ex.Message}");
+                _client = null;
             }
             return false;
         }
@@ -142,9 +146,9 @@ namespace CommandClient
                 _ipAddress = IPadd.Text.Trim();
                 _port = Port.Text.Trim();
 
-                if (!client.SetServerIPAddress(_ipAddress) || !client.SetPortNumber(_port))
+                if (!_client.SetServerIPAddress(_ipAddress) || !_client.SetPortNumber(_port))
                 {
-                    LogBox.Text += Environment.NewLine + (string.Format("Wrong IP Address or Port Number entered - {0} - {1} - press key to exit", _ipAddress, _port));
+                    LogText(Environment.NewLine);
                     Console.ReadKey();
                     return false;
                 }
@@ -154,7 +158,7 @@ namespace CommandClient
             }
             catch (Exception ex)
             {
-                LogBox.Text += $"Exception thrown: {ex.Message}" + Environment.NewLine;
+                LogText($"Exception thrown: {ex.Message}");
                 return false;
             }
         }
@@ -164,32 +168,38 @@ namespace CommandClient
             await SendCommand();
         }
 
-        private async Task<bool> SendCommand()
+        private async Task<bool> SendCommand(string cmd = "")
         {
             try
             {
-                if (client != null)
+                if (_client != null)
                 {
-                    _message = InputBox.Text.Trim();
-                    if (_message == "")
+                    if (string.IsNullOrWhiteSpace(cmd))
                     {
-                        MessageBox.Show($"{InputLabel.Text} field is empty.");
-                        return false;
+                        _message = InputBox.Text.Trim();
+                        if (_message == "")
+                        {
+                            MessageBox.Show($"{InputLabel.Text} field is empty.");
+                            return false;
+                        }
                     }
-
+                    else
+                    {
+                        _message = cmd;
+                    }
                     string json = StringToJSON(_message);
-                    LogBox.Text += "Sent JSON: " + json + Environment.NewLine;
-                    await client.SendToServer(json);
+                    LogText("Sent JSON: " + json);
+                    await _client.SendToServer(json);
                     return true;
                 }
                 else
                 {
-                    LogBox.Text += $"Client is not connected." + Environment.NewLine;
+                    LogText($"Client is not connected.");
                 }
             }
             catch (Exception ex)
             {
-                LogBox.Text += $"Exception thrown: {ex.Message}" + Environment.NewLine;
+                LogText($"Exception thrown: {ex.Message}");
             }
             return false;
         }
@@ -252,7 +262,7 @@ namespace CommandClient
 
         private void HandleTextReceived(object sender, TextReceivedEventArgs trea)
         {
-            LogBox.Text += (string.Format("{0} - Received {1}{2}", DateTime.Now, trea.TextReceived, Environment.NewLine));
+            LogText(string.Format("{0} - Received {1}{2}", DateTime.Now, trea.TextReceived, Environment.NewLine));
         }
 
         private void HandleMessage(object sender, MessageReceivedEventArgs mrea)
@@ -265,28 +275,28 @@ namespace CommandClient
                     if (nstr.Length >= 2)
                     {
                         string success = nstr[1].Split(':')[1].Split('\"')[1];
-                        LogBox.Text += $"Json response: {success}";
+                        LogText($"Json response: {success}");
                         _result = success;
                     }
                     else
                     {
-                        LogBox.Text += $"JsonReport is null in handlemessage." + Environment.NewLine;
+                        LogText($"JsonReport is null in handlemessage.");
                     }
                 }
                 catch (Exception ex)
                 {
-                    LogBox.Text += $"Handle Message Exception: {ex.Message}" + Environment.NewLine;
+                    LogText($"Handle Message Exception: {ex.Message}");
                 }
             }
             else
             {
                 if (mrea.Message.Length > 50)
                 {
-                    LogBox.Text += $"Trimmed Response: {mrea.Message.Substring(0, 50)}" + Environment.NewLine;
+                    LogText($"Trimmed Response: {mrea.Message.Substring(0, 50)}");
                 }
                 else
                 {
-                    LogBox.Text += "Response: " + mrea.Message + Environment.NewLine;
+                    LogText("Response: " + mrea.Message);
                 }
             }
         }
@@ -295,13 +305,13 @@ namespace CommandClient
         {
             try
             {
-                await client.ConnectToServer();
+                await _client.ConnectToServer();
             }
             catch (Exception ex)
             {
-                LogBox.Text += $"Exception: {ex.Message} {Environment.NewLine}";
-                client.CloseAndDisconnect();
-                client = null;
+                LogText($"Exception: {ex.Message}");
+                _client.CloseAndDisconnect();
+                _client = null;
             }
         }
 
@@ -325,13 +335,13 @@ namespace CommandClient
             {
                 if (File.Exists(path))
                 {
-                    LogBox.Text += $"Validated path, checking processes." + Environment.NewLine;
+                    LogText($"Validated path, checking processes.");
                     // Check if app is running
                     Process[] processes = Process.GetProcessesByName("Streamline");
                     if (processes == null || processes.Length == 0)
                     {
                         // SL is not running
-                        LogBox.Text += $"Streamline is not running, launching now." + Environment.NewLine;
+                        LogText($"Streamline is not running, launching now.");
 
                         ProcessStartInfo psi = new ProcessStartInfo(path)
                         {
@@ -348,23 +358,23 @@ namespace CommandClient
                             Thread.Sleep(100);
                             loading = processes[processes.Length - 1].MainWindowHandle == IntPtr.Zero;
                         }
-                        LogBox.Text += $"Streamline loaded." + Environment.NewLine;
+                        LogText($"Streamline loaded.");
                         return true;
                     }
                     else
                     {
-                        LogBox.Text += $"Streamline is currently running." + Environment.NewLine;
+                        LogText($"Streamline is currently running.");
 
                     }
                 }
                 else
                 {
-                    LogBox.Text += $"File path: {path} does not exist." + Environment.NewLine;
+                    LogText($"File path: {path} does not exist.");
                 }
             }
             catch (Exception ex)
             {
-                LogBox.Text += $"Exception: {ex.Message}" + Environment.NewLine;
+                LogText($"Exception: {ex.Message}");
             }
             return false;
         }
@@ -381,24 +391,24 @@ namespace CommandClient
             {
                 if (processes == null || processes.Length == 0)
                 {
-                    LogBox.Text += $"Streamline is not running." + Environment.NewLine;
+                    LogText($"Streamline is not running.");
                 }
                 else
                 {
                     processes[processes.Length - 1].Kill();
-                    LogBox.Text += $"Stopping Streamline process." + Environment.NewLine;
+                    LogText($"Stopping Streamline process.");
                 }
             }
             catch (Exception ex)
             {
-                LogBox.Text += $"Exception thrown when stopping Streamline: {ex.Message}." + Environment.NewLine;
+                LogText($"Exception thrown when stopping Streamline: {ex.Message}.");
             }
             finally
             {
-                if (client != null)
+                if (_client != null)
                 {
-                    client.CloseAndDisconnect();
-                    client = null;
+                    _client.CloseAndDisconnect();
+                    _client = null;
                 }
             }
         }
@@ -415,7 +425,7 @@ namespace CommandClient
             }
             catch (Exception ex)
             {
-                LogBox.Text += $"Exception thrown saving log file. {ex.Message}" + Environment.NewLine;
+                LogText($"Exception thrown saving log file. {ex.Message}");
             }
         }
 
@@ -438,8 +448,8 @@ namespace CommandClient
             {
                 PT = 10000;
             }
-
-            while (!_closing)
+            bool error = false;
+            while (!_closing && !error)
             {
                 /*
                 #region First Idea               
@@ -522,40 +532,53 @@ namespace CommandClient
                 #region RAW AF RUN
                 try
                 {
-                    LogBox.Text += $"Starting application." + Environment.NewLine;
+                    LogText($"Starting application.");
                     StartApplication();
 
                     Thread.Sleep(LT);
 
-                    LogBox.Text += $"Connecting to Host." + Environment.NewLine;
-                    ConnectToHost();
+                    //LogText($"Connecting to Host.");
+                    //ConnectToHost();
 
-                    Thread.Sleep(FT);
+                    //Thread.Sleep(FT);
 
-                    LogBox.Text += $"Sending Command." + Environment.NewLine;
+                    LogText($"Sending Command.");
                     SendCommand();
 
                     Thread.Sleep(PT);
 
-                    LogBox.Text += $"Checking report updated." + Environment.NewLine;
+                    LogText($"Checking report updated.");
                     while (string.IsNullOrWhiteSpace(_result))
                     {
                         Thread.Sleep(FT);
-                        LogBox.Text += $"Report not updated yet...." + Environment.NewLine;
+                        LogText($"Report not updated yet....");
                     }
-                    LogBox.Text += $"Result of run: {_result}" + Environment.NewLine;
+                    LogText($"Result of run: {_result}");
                     _result = "";
-                    StopApplication();
-                    Thread.Sleep(FT);
-                    SaveLogFile();
+                    /*StopApplication();
                     Thread.Sleep(500);
+                    SaveLogFile();
+                    */
+                    Thread.Sleep(FT);
                 }
                 catch (Exception ex)
                 {
-                    LogBox.Text += $"Exception in automate: {ex.Message}" + Environment.NewLine;
+                    LogText($"Exception in automate: {ex.Message}");
+                    error = true;
                 }
                 #endregion
-            
+            }
+        }
+
+        private void LogText(string log)
+        {
+            if (LogBox.InvokeRequired)
+            {
+                LogBox.Invoke(new Action(() => LogBox.Text += log + Environment.NewLine));
+            }
+            else
+            {
+                LogBox.Text += log + Environment.NewLine;
             }
         }
 
@@ -650,7 +673,157 @@ namespace CommandClient
         {
             _closing = true;
             DisposeClient();
-            this.Close();
+        }
+
+        private void BtnAddToList_Click(object sender, EventArgs e)
+        {
+            if (!string.IsNullOrWhiteSpace(InputBox.Text))
+            {
+                _commandList.Add(InputBox.Text.Trim());
+            }
+            UpdateCommandListBox();
+        }
+
+        private void BtnClearList_Click(object sender, EventArgs e)
+        {
+            _commandList.Clear();
+            UpdateCommandListBox();
+        }
+
+        private void BtnRemoveAt_Click(object sender, EventArgs e)
+        {
+            try
+            {
+                if (int.TryParse(removeAtIndex.Text, out int rslt))
+                {
+                    if (_commandList.Count >= rslt && rslt > 0)
+                    {
+                        _commandList.RemoveAt(rslt - 1);
+                    }
+                    else
+                    {
+                        LogText($"Error index: {rslt} not in range");
+                    }
+                }
+                else
+                {
+                    LogText($"Error, index not recognized as number");
+                }
+            }
+            catch (Exception ex)
+            {
+                LogText($"Exception removing element from command list: {ex.Message}");
+            }
+            UpdateCommandListBox();
+        }
+
+        private void UpdateCommandListBox()
+        {
+            inputList.Clear();
+            for (int i = 0; i < _commandList.Count; i++)
+            {
+                if (inputList.InvokeRequired)
+                {
+                    inputList.Invoke(new Action(() => inputList.Text += $"{i + 1}: {_commandList[i]}" + Environment.NewLine));
+                }
+                else
+                {
+                    inputList.Text += $"{i + 1}: {_commandList[i]}" + Environment.NewLine;
+                }
+            }
+        }
+
+        private void BtnStartLoopList_Click(object sender, EventArgs e)
+        {
+            if (_runCommandList)
+            {
+                LogText("Command List is running currently.");
+            }
+            else
+            {
+                _runCommandList = true;
+                Task.Run(() => RunCommandList());
+            }
+        }
+
+        private void RunCommandList()
+        {
+            bool error = false;
+            int currentIndex = 0;
+            if (_commandList?.Count > 0)
+            {
+                while (_runCommandList && !_closing && !error)
+                {
+                    try
+                    {
+                        if (currentIndex >= _commandList.Count)
+                        {
+                            currentIndex = 0;
+                        }
+                        LogText($"Sending Command.");
+                        SendCommand(_commandList[currentIndex]);
+
+                        Thread.Sleep(1000);
+
+                        LogText($"Checking report...");
+                        while (string.IsNullOrWhiteSpace(_result))
+                        {
+                            Thread.Sleep(1000);
+                            LogText($"Report not updated yet....");
+                        }
+                        LogText($"Result of run: {_result}");
+                        _result = "";
+                        currentIndex++;
+                        Thread.Sleep(1000);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogText($"Exception thrown running command list: {ex.Message}");
+                        error = true;
+                    }
+                }
+            }
+            else
+            {
+                LogText("Error command list is empty.");
+            }
+
+            LogText($"Ending command list loop. run command list: {_runCommandList}, closing: {_closing}, error: {error}, current index: {currentIndex} ");
+            _runCommandList = false;
+        }
+
+        private void BtnStopLoopList_Click(object sender, EventArgs e)
+        {
+            _runCommandList = false;
+        }
+
+        public static bool IsProcessRunning(string processName)
+        {
+            // Get all processes with the specified name
+            Process[] processes = Process.GetProcessesByName(processName);
+
+            // Check if any process with the specified name is running
+            return processes.Length > 0;
+        }
+
+        private void RestartStreamline_Click(object sender, EventArgs e)
+        {
+            LogText($"Restarting Streamline...");
+            try
+            {
+                StopApplication();
+
+                while (IsProcessRunning("streamline"))
+                {
+                    Thread.Sleep(100);
+                }
+
+                StartApplication();
+            }
+            catch (Exception ex)
+            {
+                LogText($"Exception thrown when restarting Streamline: {ex.Message}.");
+            }
         }
     }
 }
